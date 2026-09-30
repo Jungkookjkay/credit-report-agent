@@ -1,0 +1,5 @@
+# Rule selection only; deterministic arithmetic is implemented in src/rules.py.
+default_rule: STANDARD_CAPPED
+standard_cap: "0.20"
+client_rules:
+  CLIENT-004: CLIENT_004_SPECIAL

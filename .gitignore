@@ -1,0 +1,11 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.log
+.env
+.venv/
+venv/
+.DS_Store
+output/*.csv
+output/*.parquet

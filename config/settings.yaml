@@ -1,0 +1,6 @@
+# Phase 1 placeholder configuration
+finance_directory: input/finance
+devops_directory: input/devops
+output_directory: output
+reporting_month: null
+max_exception_rows: 1000
