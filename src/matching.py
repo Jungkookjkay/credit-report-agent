@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import OrderedDict
 from typing import Any
 
 import pandas as pd
@@ -13,24 +12,6 @@ else:
     from models import FinanceRecord, MatchResult
 
 
-FINANCE_LINEAGE_COLUMNS = {
-    "source_file",
-    "source_sheet",
-    "source_row_number",
-    "processing_run_id",
-    "filename_client_hint",
-    "filename_month_hint",
-    "workbook_month_hint",
-    "month_conflict",
-}
-FINANCE_DERIVED_COLUMNS = {
-    "resolved_client",
-    "client_resolution_method",
-    "normalized_market_code",
-    "normalized_market_tokens",
-    "market_code_tokenization_safe",
-    "market_code_tokenization_note",
-}
 MATCH_RESULT_COLUMNS = (
     "matching_status",
     "match_confidence",
@@ -62,32 +43,6 @@ def _row_tokens(value: Any) -> tuple[str, ...]:
     if isinstance(value, (list, tuple)):
         return tuple(token for token in value if isinstance(token, str))
     return ()
-
-
-def _source_value(value: Any) -> Any:
-    if _is_missing(value):
-        return ("<NULL>",)
-    if hasattr(value, "item"):
-        try:
-            value = value.item()
-        except (ValueError, AttributeError):
-            pass
-    if isinstance(value, list):
-        return tuple(_source_value(item) for item in value)
-    try:
-        hash(value)
-    except TypeError:
-        return (type(value).__name__, repr(value))
-    return type(value).__name__, value
-
-
-def _source_columns(finance: pd.DataFrame) -> tuple[str, ...]:
-    return tuple(
-        column
-        for column in finance.columns
-        if column not in FINANCE_LINEAGE_COLUMNS
-        and column not in FINANCE_DERIVED_COLUMNS
-    )
 
 
 def _finance_record(row: pd.Series) -> FinanceRecord:
@@ -122,14 +77,9 @@ def _record_reference(row: pd.Series) -> str:
 
 def _candidate_groups(
     candidates: pd.DataFrame,
-    source_columns: tuple[str, ...],
 ) -> list[list[pd.Series]]:
-    """Group identical source payloads without dropping their lineage rows."""
-    grouped: OrderedDict[tuple[Any, ...], list[pd.Series]] = OrderedDict()
-    for _, row in candidates.iterrows():
-        signature = tuple(_source_value(row.get(column)) for column in source_columns)
-        grouped.setdefault(signature, []).append(row)
-    return list(grouped.values())
+    """Keep each Finance source row as an independent matching candidate."""
+    return [[row] for _, row in candidates.iterrows()]
 
 
 def _all_candidate_records(groups: list[list[pd.Series]]) -> tuple[FinanceRecord, ...]:
@@ -231,15 +181,7 @@ def match_sla_record(
             lambda tokens: market_code in _row_tokens(tokens)
         )
     ]
-    atomic_rows = token_rows.loc[
-        token_rows["normalized_market_code"].eq(market_code)
-        & token_rows["normalized_market_tokens"].map(
-            lambda tokens: len(_row_tokens(tokens)) == 1
-        )
-    ]
-
-    source_columns = _source_columns(finance)
-    atomic_groups = _candidate_groups(atomic_rows, source_columns)
+    candidate_groups = _candidate_groups(token_rows)
     prefix_used = bool(devops_row.get("client002_prefix_removed", False))
     prefix_note = (
         " The approved CLIENT-002 client002_ prefix normalization was applied."
@@ -247,52 +189,37 @@ def match_sla_record(
         else ""
     )
 
-    if len(atomic_groups) == 1:
-        return _matched_result(
-            atomic_groups[0],
-            "EXACT_CODE_MATCH",
+    if len(candidate_groups) == 1:
+        group = candidate_groups[0]
+        matched_row = group[0]
+        tokens = _row_tokens(matched_row.get("normalized_market_tokens"))
+        is_atomic_match = (
+            matched_row.get("normalized_market_code") == market_code
+            and len(tokens) == 1
+        )
+        method = "EXACT_CODE_MATCH" if is_atomic_match else "COMPOSITE_CODE_MATCH"
+        match_description = (
             "One unique Finance record has the exact normalized atomic market code."
-            + prefix_note,
-        )
-    if len(atomic_groups) > 1:
-        return _base_result(
-            "AMBIGUOUS",
-            "LOW",
-            exception_code="AMBIGUOUS_MATCH",
-            explanation=(
-                "Multiple distinct Finance records in the correct client scope have "
-                "the exact normalized atomic market code. No record was selected."
-                + prefix_note
-            ),
-            candidate_groups=atomic_groups,
-        )
-
-    composite_rows = token_rows.loc[
-        token_rows["normalized_market_tokens"].map(
-            lambda tokens: len(_row_tokens(tokens)) > 1
-        )
-    ]
-    composite_groups = _candidate_groups(composite_rows, source_columns)
-    if len(composite_groups) == 1:
-        return _matched_result(
-            composite_groups[0],
-            "COMPOSITE_CODE_MATCH",
-            "One unique Finance record contains the exact normalized market token "
+            if is_atomic_match
+            else "One unique Finance record contains the exact normalized market token "
             "within its composite market-code field."
-            + prefix_note,
         )
-    if len(composite_groups) > 1:
+        return _matched_result(
+            group,
+            method,
+            match_description + prefix_note,
+        )
+    if len(candidate_groups) > 1:
         return _base_result(
             "AMBIGUOUS",
             "LOW",
             exception_code="AMBIGUOUS_MATCH",
             explanation=(
-                "Multiple distinct Finance records in the correct client scope "
-                "contain the exact normalized token in composite market-code fields. "
-                "No record was selected."
+                "Multiple distinct Finance source records in the correct client "
+                "scope contain the exact normalized market token. No record was selected."
                 + prefix_note
             ),
-            candidate_groups=composite_groups,
+            candidate_groups=candidate_groups,
         )
 
     return _base_result(

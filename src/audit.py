@@ -31,25 +31,27 @@ ASSESSMENT_CLIENT_ROW_COUNTS = {
 	("CLIENT-004", "2026-04"): 56,
 }
 ASSESSMENT_BREACH_COUNTS = {
-	"CLIENT-001": (7, 4, 2, 1),
-	"CLIENT-002": (8, 3, 2, 3),
+	"CLIENT-001": (7, 2, 5, 0),
+	"CLIENT-002": (8, 2, 4, 2),
 	"CLIENT-004": (4, 4, 0, 4),
 }
 ASSESSMENT_EXCEPTION_CODE_COUNTS = {
 	("CLIENT-001", "AMBIGUOUS_MATCH"): 6,
+	("CLIENT-001", "COMPOSITE_ALLOCATION_AMBIGUITY"): 3,
 	("CLIENT-001", "NON_UNIQUE_FINANCE_KEY"): 6,
-	("CLIENT-001", "NO_FINANCE_MATCH"): 4,
-	("CLIENT-002", "AMBIGUOUS_MATCH"): 15,
+	("CLIENT-001", "NO_FINANCE_MATCH"): 3,
+	("CLIENT-002", "AMBIGUOUS_MATCH"): 18,
+	("CLIENT-002", "COMPOSITE_ALLOCATION_AMBIGUITY"): 5,
 	("CLIENT-002", "MISSING_FINANCE_PARENT"): 1,
 	("CLIENT-002", "MONTH_CONFLICT"): 66,
 	("CLIENT-002", "NON_UNIQUE_FINANCE_KEY"): 4,
-	("CLIENT-002", "NO_FINANCE_MATCH"): 17,
+	("CLIENT-002", "NO_FINANCE_MATCH"): 16,
 	("CLIENT-004", "CURRENCY_UNKNOWN"): 55,
 	("CLIENT-004", "NO_FINANCE_MATCH"): 55,
 }
 ASSESSMENT_CREDIT_TOTALS = {
-	("CLIENT-001", "EUR"): Decimal("1084.716168925"),
-	("CLIENT-002", "USD"): Decimal("1240.742913354"),
+	("CLIENT-001", "EUR"): Decimal("702.960636375"),
+	("CLIENT-002", "USD"): Decimal("463.360430778"),
 	(
 		"CLIENT-004",
 		UNKNOWN_CURRENCY_BUCKET,
@@ -520,7 +522,7 @@ def run_phase12_reconciliations(
 	_add_control(
 		controls,
 		"Breached-market outcomes by client",
-		"CLIENT-001=7/4/2/1; CLIENT-002=8/3/2/3; CLIENT-004=4/4/0/4 (breached/calculated/ambiguous/unmatched)",
+		"CLIENT-001=7/2/5/0; CLIENT-002=8/2/4/2; CLIENT-004=4/4/0/4 (breached/calculated/ambiguous/unmatched)",
 		"; ".join(
 			f"{client}=" + "/".join(str(value) for value in counts)
 			for client, counts in sorted(client_breach_actual.items())
@@ -674,7 +676,7 @@ def run_phase12_reconciliations(
 	_add_control(
 		controls,
 		"Excel exception output and 66 pending month conflicts",
-		"229 exception-code rows; 66 unresolved MONTH_CONFLICT rows",
+		"238 exception-code rows; 66 unresolved MONTH_CONFLICT rows",
 		f"excel_exception_code_rows={sum(excel_exception_counts.values())}; MAY26_pending={66 if pending_ok else 'not reconciled'}",
 		month_conflict_excel_ok,
 		"The Exceptions workbook is read-only checked; all MAY26 conflict rows remain unresolved and outside authoritative totals.",

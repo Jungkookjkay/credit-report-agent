@@ -226,6 +226,7 @@ def _format_worksheet(worksheet: Any, frame: pd.DataFrame, title: str) -> None:
     exception_fills = {
         "MONTH_CONFLICT": PatternFill("solid", fgColor="FCE4D6"),
         "AMBIGUOUS_MATCH": PatternFill("solid", fgColor="FFF2CC"),
+        "COMPOSITE_ALLOCATION_AMBIGUITY": PatternFill("solid", fgColor="FFF2CC"),
         "NO_FINANCE_MATCH": PatternFill("solid", fgColor="FFF2CC"),
         "CURRENCY_UNKNOWN": PatternFill("solid", fgColor="DDEBF7"),
     }

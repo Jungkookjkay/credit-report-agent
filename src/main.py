@@ -17,7 +17,7 @@ if __package__:
 	from .matching import match_sla_record
 	from .models import SLARecord
 	from .normalization import normalize_devops_records, normalize_finance_records
-	from .processing import process_sla_records
+	from .processing import apply_composite_allocation_control, process_sla_records
 	from .reporting import (
 		build_client_totals,
 		build_detailed_report,
@@ -34,7 +34,7 @@ else:
 	from matching import match_sla_record
 	from models import SLARecord
 	from normalization import normalize_devops_records, normalize_finance_records
-	from processing import process_sla_records
+	from processing import apply_composite_allocation_control, process_sla_records
 	from reporting import (
 		build_client_totals,
 		build_detailed_report,
@@ -149,10 +149,16 @@ def run_pipeline(
 		for _, row in devops.iterrows()
 	]
 	sla_records = [_to_sla_record(row) for _, row in devops.iterrows()]
+	normalized_markets = devops["normalized_market_code"].tolist()
+	match_results = apply_composite_allocation_control(
+		sla_records,
+		match_results,
+		normalized_markets,
+	)
 	credit_results = process_sla_records(
 		sla_records,
 		match_results,
-		normalized_devops_markets=devops["normalized_market_code"].tolist(),
+		normalized_devops_markets=normalized_markets,
 		source_exceptions=tuple(finance_exceptions + devops_exceptions),
 	)
 

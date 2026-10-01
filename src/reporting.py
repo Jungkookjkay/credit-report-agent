@@ -146,7 +146,14 @@ def _source_lineage(result: CreditResult) -> str:
 def explain_credit_result(result: CreditResult) -> str:
 	"""Build a stable human-readable explanation from authoritative result fields."""
 	codes = _exception_codes(result)
-	if result.status == "INELIGIBLE" or "MONTH_CONFLICT" in codes:
+	if result.exception_code == "COMPOSITE_ALLOCATION_AMBIGUITY":
+		explanation = result.explanation or (
+			"The Finance record contains this market within a composite market field, "
+			"but the same Finance Base Credit corresponds to multiple DevOps markets. "
+			"No allocation rule is provided, so the Base Credit was not reused and no "
+			"authoritative credit was calculated."
+		)
+	elif result.status == "INELIGIBLE" or "MONTH_CONFLICT" in codes:
 		explanation = (
 			"Reporting month is unresolved due to MONTH_CONFLICT; the row is "
 			"ineligible and excluded from authoritative monthly totals."

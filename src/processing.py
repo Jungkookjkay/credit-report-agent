@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterable, Sequence
+from dataclasses import replace
 from datetime import datetime
 import re
 from uuid import uuid4
@@ -11,9 +13,11 @@ import pandas as pd
 
 if __package__:
     from .models import CreditResult, ExceptionRecord, FinanceRecord, MatchResult, SLARecord
+    from .normalization import normalize_client, normalize_devops_market_code, normalize_market_code
     from .rules import RuleResult, calculate_credit, rule_requires_finance, select_rule
 else:
     from models import CreditResult, ExceptionRecord, FinanceRecord, MatchResult, SLARecord
+    from normalization import normalize_client, normalize_devops_market_code, normalize_market_code
     from rules import RuleResult, calculate_credit, rule_requires_finance, select_rule
 
 
@@ -21,6 +25,13 @@ _MONTH_PATTERN = re.compile(
     r"(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|"
     r"JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[-_ ]?(\d{2,4})",
     flags=re.IGNORECASE,
+)
+COMPOSITE_ALLOCATION_AMBIGUITY = "COMPOSITE_ALLOCATION_AMBIGUITY"
+COMPOSITE_ALLOCATION_EXPLANATION = (
+    "The Finance record contains this market within a composite market field, but "
+    "the same Finance Base Credit corresponds to multiple DevOps markets. No "
+    "allocation rule is provided, so the Base Credit was not reused and no "
+    "authoritative credit was calculated."
 )
 
 
@@ -92,6 +103,85 @@ def _unique_matched_record(
     if match_result.matched_finance_record not in (None, records[0]):
         return None
     return records[0]
+
+
+def _finance_source_identity(
+    record: FinanceRecord,
+) -> tuple[str, str, int] | None:
+    if (
+        not isinstance(record.source_file, str)
+        or not record.source_file.strip()
+        or not isinstance(record.source_sheet, str)
+        or not record.source_sheet.strip()
+        or _is_missing(record.source_row_number)
+    ):
+        return None
+    try:
+        row_number = int(record.source_row_number)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return record.source_file, record.source_sheet, row_number
+
+
+def apply_composite_allocation_control(
+    sla_records: Sequence[SLARecord],
+    match_results: Sequence[MatchResult],
+    normalized_devops_markets: Sequence[object | None],
+) -> tuple[MatchResult, ...]:
+    """Block reuse of one composite Finance row across distinct markets in a month."""
+    allocations: dict[
+        tuple[str, str, str, str, int], list[tuple[int, str]]
+    ] = defaultdict(list)
+    for index, (sla, match, supplied_market) in enumerate(
+        zip(sla_records, match_results, normalized_devops_markets)
+    ):
+        if match.status != "MATCHED" or match.match_method != "COMPOSITE_CODE_MATCH":
+            continue
+        finance_records = _finance_records(match)
+        if len(finance_records) != 1:
+            continue
+        finance_identity = _finance_source_identity(finance_records[0])
+        if finance_identity is None:
+            continue
+        month, month_status = _resolved_month(sla, match)
+        client = normalize_client(sla.client)
+        if month_status != "RESOLVED" or month is None or client is None:
+            continue
+        if _is_missing(supplied_market):
+            market, _ = normalize_devops_market_code(sla.raw_market_code, sla.client)
+        else:
+            market = normalize_market_code(supplied_market)
+        if market is None:
+            continue
+        allocations[(client, month, *finance_identity)].append((index, market))
+
+    adjusted = list(match_results)
+    for uses in allocations.values():
+        if len({market for _, market in uses}) <= 1:
+            continue
+        for index, _ in uses:
+            match = adjusted[index]
+            finance_records = _finance_records(match)
+            candidate_records = match.candidate_finance_records or finance_records
+            candidate_references = (
+                match.candidate_finance_references
+                or match.matched_finance_references
+            )
+            adjusted[index] = replace(
+                match,
+                status="AMBIGUOUS",
+                confidence="LOW",
+                matched_finance_record=None,
+                matched_finance_reference=None,
+                matched_finance_records=(),
+                matched_finance_references=(),
+                candidate_count=len(candidate_records),
+                candidate_finance_records=candidate_records,
+                candidate_finance_references=candidate_references,
+                exception_code=COMPOSITE_ALLOCATION_AMBIGUITY,
+                explanation=COMPOSITE_ALLOCATION_EXPLANATION,
+            )
+    return tuple(adjusted)
 
 
 def _exception_identity(exception: ExceptionRecord) -> tuple[str | None, int | None]:
@@ -339,6 +429,7 @@ def process_sla_records(
             "SLA records, MatchResults, and normalized markets must have equal lengths."
         )
 
+    matches = apply_composite_allocation_control(slas, matches, markets)
     run_id = processing_run_id or uuid4().hex
     return [
         process_sla_record(
@@ -353,4 +444,8 @@ def process_sla_records(
     ]
 
 
-__all__ = ["process_sla_record", "process_sla_records"]
+__all__ = [
+    "apply_composite_allocation_control",
+    "process_sla_record",
+    "process_sla_records",
+]

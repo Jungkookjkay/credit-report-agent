@@ -79,11 +79,10 @@ def test_finance_market_code_tokenization_uses_observed_delimiters() -> None:
 	assert semicolon_codes.normalized_tokens == ("AMS", "BRU", "LIS", "PAR")
 
 
-def test_complex_market_codes_preserve_ambiguous_punctuation() -> None:
-	slash_code = tokenize_finance_market_code("CME\nCBOT\nCOMEX/NYMEX\nCMEC")
-	assert slash_code.normalized_tokens == ("CME", "CBOT", "COMEX/NYMEX", "CMEC")
-	assert not slash_code.tokenization_safe
-	assert "slash retained" in (slash_code.tokenization_note or "")
+def test_supported_composite_delimiters_split_exact_market_tokens() -> None:
+	slash_codes = tokenize_finance_market_code("CME\nCBOT\nCOMEX/NYMEX\nCMEC")
+	assert slash_codes.normalized_tokens == ("CME", "CBOT", "COMEX", "NYMEX", "CMEC")
+	assert slash_codes.tokenization_safe
 
 	qualified_code = tokenize_finance_market_code("CME, NYMEX (incl. COMEX)")
 	assert qualified_code.normalized_tokens == ("CME", "NYMEX (INCL. COMEX)")

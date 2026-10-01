@@ -92,6 +92,97 @@ def test_high_confidence_composite_match_calculates_standard_credit() -> None:
     assert result.matched_finance_market == "LIFAMS\nLIFBRU"
 
 
+def test_composite_finance_row_for_one_distinct_market_remains_calculable() -> None:
+    finance = _finance("LIFAMS\nLIFBRU")
+    results = process_sla_records(
+        [_sla("lifams")],
+        [_matched(finance, method="COMPOSITE_CODE_MATCH")],
+        normalized_devops_markets=["LIFAMS"],
+    )
+
+    assert results[0].match_status == "MATCHED"
+    assert results[0].match_confidence == "HIGH"
+    assert results[0].status == "CALCULATED"
+    assert results[0].calculated_credit == Decimal("500.00")
+
+
+def test_composite_finance_row_shared_across_markets_is_allocation_ambiguous() -> None:
+    finance = _finance("CME\nCBOT\nCOMEX/NYMEX", base="1510.7065", currency="EUR")
+    sla_records = [
+        _sla("cme", breach="0", row=1),
+        _sla("nymex", breach="0.05", row=2),
+    ]
+    matches = [
+        _matched(finance, method="COMPOSITE_CODE_MATCH"),
+        _matched(finance, method="COMPOSITE_CODE_MATCH"),
+    ]
+
+    results = process_sla_records(
+        sla_records,
+        matches,
+        normalized_devops_markets=["CME", "NYMEX"],
+        processing_run_id="allocation-ambiguous-run",
+    )
+
+    expected_explanation = (
+        "The Finance record contains this market within a composite market field, but "
+        "the same Finance Base Credit corresponds to multiple DevOps markets. No "
+        "allocation rule is provided, so the Base Credit was not reused and no "
+        "authoritative credit was calculated."
+    )
+    assert len(results) == 2
+    for result in results:
+        assert result.match_status == "AMBIGUOUS"
+        assert result.match_confidence == "LOW"
+        assert result.match_method == "COMPOSITE_CODE_MATCH"
+        assert result.status == "EXCEPTION"
+        assert result.exception_code == "COMPOSITE_ALLOCATION_AMBIGUITY"
+        assert result.calculated_credit is None
+        assert result.applied_rate is None
+        assert result.base_credit is None
+        assert result.currency is None
+        assert result.candidate_count == 1
+        assert result.candidate_finance_records == (finance,)
+        assert result.finance_source_row_number is None
+        assert expected_explanation in result.explanation
+
+
+def test_duplicate_devops_rows_for_same_market_do_not_trigger_allocation_ambiguity() -> None:
+    finance = _finance("LIFAMS\nLIFBRU")
+    results = process_sla_records(
+        [_sla("lifams", breach="0", row=1), _sla("LIFAMS", row=2)],
+        [
+            _matched(finance, method="COMPOSITE_CODE_MATCH"),
+            _matched(finance, method="COMPOSITE_CODE_MATCH"),
+        ],
+        normalized_devops_markets=["LIFAMS", "LIFAMS"],
+    )
+
+    assert [result.match_status for result in results] == ["MATCHED", "MATCHED"]
+    assert [result.status for result in results] == ["ZERO_CREDIT", "CALCULATED"]
+
+
+def test_composite_finance_row_reuse_is_scoped_by_client_and_reporting_month() -> None:
+    finance = _finance("LIFAMS\nLIFBRU")
+    may_sla = _sla("lifbru", source_file="devops-MAY26.xlsx", row=2)
+    may_sla.workbook_month_hint = "May 2026"
+    results = process_sla_records(
+        [
+            _sla("lifams", row=1),
+            may_sla,
+        ],
+        [
+            _matched(finance, method="COMPOSITE_CODE_MATCH"),
+            _matched(finance, method="COMPOSITE_CODE_MATCH"),
+        ],
+        normalized_devops_markets=["LIFAMS", "LIFBRU"],
+    )
+
+    assert [result.reporting_month for result in results] == ["2026-04", "2026-05"]
+    assert [result.match_status for result in results] == ["MATCHED", "MATCHED"]
+    assert [result.status for result in results] == ["CALCULATED", "CALCULATED"]
+
+
 def test_standard_rule_cap_is_applied_during_processing() -> None:
     result = process_sla_record(
         _sla(breach="0.35"), _matched(_finance()), processing_run_id="run-1"

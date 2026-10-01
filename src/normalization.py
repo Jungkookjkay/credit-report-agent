@@ -10,7 +10,7 @@ import pandas as pd
 
 
 CLIENT_MARKET_PREFIX_RULES = {"CLIENT-002": "client002_"}
-FINANCE_MARKET_CODE_DELIMITERS = re.compile(r"[\r\n,;]+")
+FINANCE_MARKET_CODE_DELIMITERS = re.compile(r"[\r\n,;/]+")
 APPROVED_CUSTOMER_WD_PATTERN = re.compile(r"^(CLIENT-[0-9]+)-WD-[0-9]+$", re.IGNORECASE)
 
 
@@ -90,11 +90,10 @@ def normalize_devops_market_code(
 
 
 def tokenize_finance_market_code(value: Any) -> FinanceMarketCodeTokens:
-	"""Split only documented composite delimiters and preserve ambiguous parts.
+	"""Split supported composite delimiters and preserve qualified code text.
 
-	Line breaks and commas are present in the supplied Finance data. Semicolons
-	are included as a documented delimiter. Slash and parenthetical qualifiers
-	remain inside their token and cause the result to carry a limitation note.
+	Line breaks, commas, semicolons, and slashes are supported delimiters observed
+	in Finance market-code fields. Parenthetical qualifiers remain inside tokens.
 	"""
 	if value is None or pd.isna(value):
 		return FinanceMarketCodeTokens((), True)
@@ -108,8 +107,6 @@ def tokenize_finance_market_code(value: Any) -> FinanceMarketCodeTokens:
 	)
 
 	limitations: list[str] = []
-	if "/" in raw_text:
-		limitations.append("slash retained inside token; not treated as a delimiter")
 	if "(" in raw_text or ")" in raw_text:
 		limitations.append("parenthetical qualifier retained inside token")
 
